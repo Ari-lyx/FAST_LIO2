@@ -79,7 +79,7 @@ bool   runtime_pos_log = false, pcd_save_en = false, time_sync_en = false, extri
 float res_last[100000] = {0.0};
 float DET_RANGE = 300.0f;
 const float MOV_THRESHOLD = 1.5f;
-double time_diff_lidar_to_imu = 0.0;
+double time_diff_lidar_to_imu = -0.115718;
 
 mutex mtx_buffer;
 condition_variable sig_buffer;
@@ -513,34 +513,34 @@ void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Share
     /**************** save map ****************/
     /* 1. make sure you have enough memories
     /* 2. noted that pcd save will influence the real-time performences **/
-    /*
-    if (pcd_save_en)
-    {
-        int size = feats_undistort->points.size();
-        PointCloudXYZI::Ptr laserCloudWorld( \
-                        new PointCloudXYZI(size, 1));
+    
+    // if (pcd_save_en)
+    // {
+    //     int size = feats_undistort->points.size();
+    //     PointCloudXYZI::Ptr laserCloudWorld( \
+    //                     new PointCloudXYZI(size, 1));
 
-        for (int i = 0; i < size; i++)
-        {
-            RGBpointBodyToWorld(&feats_undistort->points[i], \
-                                &laserCloudWorld->points[i]);
-        }
-        *pcl_wait_save += *laserCloudWorld;
+    //     for (int i = 0; i < size; i++)
+    //     {
+    //         RGBpointBodyToWorld(&feats_undistort->points[i], \
+    //                             &laserCloudWorld->points[i]);
+    //     }
+    //     *pcl_wait_save += *laserCloudWorld;
 
-        static int scan_wait_num = 0;
-        scan_wait_num ++;
-        if (pcl_wait_save->size() > 0 && pcd_save_interval > 0  && scan_wait_num >= pcd_save_interval)
-        {
-            pcd_index ++;
-            string all_points_dir(string(string(ROOT_DIR) + "PCD/scans_") + to_string(pcd_index) + string(".pcd"));
-            pcl::PCDWriter pcd_writer;
-            cout << "current scan saved to /PCD/" << all_points_dir << endl;
-            pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
-            pcl_wait_save->clear();
-            scan_wait_num = 0;
-        }
-    }
-    */
+    //     static int scan_wait_num = 0;
+    //     scan_wait_num ++;
+    //     if (pcl_wait_save->size() > 0 && pcd_save_interval > 0  && scan_wait_num >= pcd_save_interval)
+    //     {
+    //         pcd_index ++;
+    //         string all_points_dir(string(string(ROOT_DIR) + "PCD/scans_") + to_string(pcd_index) + string(".pcd"));
+    //         pcl::PCDWriter pcd_writer;
+    //         cout << "current scan saved to /PCD/" << all_points_dir << endl;
+    //         pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
+    //         pcl_wait_save->clear();
+    //         scan_wait_num = 0;
+    //     }
+    // }
+    
 }
 
 void publish_frame_body(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_body)
