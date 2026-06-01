@@ -374,16 +374,62 @@ void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
     last_timestamp_imu = timestamp;
 
     imu_buffer.push_back(msg);
+    // === Limit IMU buffer size to prevent unbounded growth during fast playback ===
+    const int max_imu_buffer_size = 2000;
+    if (imu_buffer.size() > max_imu_buffer_size)
+    {
+        int drop_count = imu_buffer.size() - max_imu_buffer_size / 2;
+        for (int i = 0; i < drop_count; i++)
+            imu_buffer.pop_front();
+        printf("[ WARN ] IMU buffer overflow, dropped %d msgs, size: %ld\n",
+               drop_count, imu_buffer.size());
+    }
     mtx_buffer.unlock();
     sig_buffer.notify_all();
 }
 
 double lidar_mean_scantime = 0.0;
 int    scan_num = 0;
+// === Adaptive frame-skip for fast rosbag playback ===
+int    skip_frame_count = 0;           // counter for skipped frames
+int    max_lidar_buffer_size = 5;      // max lidar buffer before forced skipping
+bool   adaptive_downsample_en = false; // enable adaptive downsampling under load
+double last_process_time = 0.0;        // last frame processing time
+double avg_process_time = 0.05;        // average processing time (EWA)
+int    process_time_samples = 0;       // number of samples for averaging
 bool sync_packages(MeasureGroup &meas)
 {
     if (lidar_buffer.empty() || imu_buffer.empty()) {
         return false;
+    }
+
+    // === Buffer overload detection: clear lidar buffer if it grows too large ===
+    if (lidar_buffer.size() > max_lidar_buffer_size)
+    {
+        int drop_count = lidar_buffer.size() - 2; // keep at most 2 frames
+        for (int i = 0; i < drop_count && !lidar_buffer.empty(); i++)
+        {
+            lidar_buffer.pop_front();
+            time_buffer.pop_front();
+            skip_frame_count++;
+        }
+        if (skip_frame_count > 0)
+        {
+            printf("[ WARN ] Buffer overload: dropped %d lidar frames (total skipped: %d), buffer size: %ld\n",
+                   drop_count, skip_frame_count, lidar_buffer.size());
+            skip_frame_count = 0;
+        }
+        if (lidar_buffer.empty()) return false;
+    }
+
+    // === Adaptive downsampling: increase filter when processing is too slow ===
+    if (adaptive_downsample_en && avg_process_time > 0.08 && process_time_samples > 10
+        && filter_size_surf_min < 2.0)
+    {
+        filter_size_surf_min = std::min(2.0, filter_size_surf_min * 1.3);
+        downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
+        printf("[ WARN ] Processing slow (%.3fs avg), increasing surf filter to %.2f\n",
+               avg_process_time, filter_size_surf_min);
     }
 
     /*** push a lidar scan ***/
@@ -829,6 +875,8 @@ public:
         this->declare_parameter<bool>("feature_extract_enable", false);
         this->declare_parameter<bool>("runtime_pos_log_enable", false);
         this->declare_parameter<bool>("mapping.extrinsic_est_en", true);
+        this->declare_parameter<bool>("adaptive_downsample_en", false);  // enable adaptive downsampling for fast playback
+        this->declare_parameter<int>("max_lidar_buffer_size", 5);         // max lidar buffer before forced frame-skip
         this->declare_parameter<bool>("pcd_save.pcd_save_en", false);
         this->declare_parameter<int>("pcd_save.interval", -1);
         this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
@@ -865,6 +913,8 @@ public:
         this->get_parameter_or<bool>("feature_extract_enable", p_pre->feature_enabled, false);
         this->get_parameter_or<bool>("runtime_pos_log_enable", runtime_pos_log, 0);
         this->get_parameter_or<bool>("mapping.extrinsic_est_en", extrinsic_est_en, true);
+        this->get_parameter_or<bool>("adaptive_downsample_en", adaptive_downsample_en, false);
+        this->get_parameter_or<int>("max_lidar_buffer_size", max_lidar_buffer_size, 5);
         this->get_parameter_or<bool>("pcd_save.pcd_save_en", pcd_save_en, false);
         this->get_parameter_or<int>("pcd_save.interval", pcd_save_interval, -1);
         this->get_parameter_or<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());
@@ -1074,6 +1124,12 @@ private:
             if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body_);
             if (effect_pub_en) publish_effect_world(pubLaserCloudEffect_);
             // if (map_pub_en) publish_map(pubLaserCloudMap_);
+
+            // === Track per-frame processing time for adaptive downsampling ===
+            last_process_time = t5 - t0;
+            process_time_samples++;
+            double alpha = 0.1; // EWA smoothing factor
+            avg_process_time = avg_process_time * (1.0 - alpha) + last_process_time * alpha;
 
             /*** Debug variables ***/
             if (runtime_pos_log)

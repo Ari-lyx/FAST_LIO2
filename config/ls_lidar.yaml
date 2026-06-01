@@ -1,13 +1,16 @@
 /**:
     ros__parameters:
         feature_extract_enable: false
-        point_filter_num: 4
-        max_iteration: 3
-        filter_size_surf: 0.5
-        filter_size_map: 0.5
-        cube_side_length: 1000.0
+        point_filter_num: 4           # 增大可减少输入点数: 4→6~8 减少约33%~50%计算量
+        max_iteration: 3              # IEKF迭代次数: 3→2 可大幅减少ICP时间
+        filter_size_surf: 0.5         # 去畸变后体素降采样(m): 0.5→0.8~1.0 减少点数
+        filter_size_map: 0.5          # 地图体素降采样(m): 0.5→0.8~1.0 减少KD树搜索
+        cube_side_length: 1000.0      # 局部地图边长(m): 可考虑减小到500减少地图维护开销
         runtime_pos_log_enable: false
         map_file_path: "/home/lyx/Downloads/FAST_LIO2_ws/pcd/test.pcd"
+        # === 快速播放防漂移参数 ===
+        adaptive_downsample_en: true  # 启用自适应降采样: 处理慢时自动增大filter
+        max_lidar_buffer_size: 3      # 雷达缓冲区上限: 超过则丢帧, 防止时间戳滞后
 
         common:
             lid_topic:  "/cx/lslidar_point_cloud"
@@ -24,10 +27,10 @@
             blind: 0.5
 
         mapping:
-            acc_cov: 0.5
-            gyr_cov: 0.5
-            b_acc_cov: 0.0005
-            b_gyr_cov: 0.0005
+            acc_cov: 0.5               # 加速度噪声协方差: 增大会降低对IMU的信任,更多依赖雷达
+            gyr_cov: 0.5               # 陀螺仪噪声协方差: 同上, 快速播放时IMU积分误差大, 应增大
+            b_acc_cov: 0.0005          # 加速度bias协方差
+            b_gyr_cov: 0.0005          # 陀螺仪bias协方差
             fov_degree:    360.0
             det_range:     100.0
             extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic,
