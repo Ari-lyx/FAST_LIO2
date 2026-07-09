@@ -30,7 +30,8 @@ def generate_launch_description():
 
     # ======================== 可配置参数 ========================
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
-    world_name = LaunchConfiguration('world', default='turtlebot3_world')
+    # world 参数：传入 world 文件名（含扩展名，如 turtlebot3_world.world）
+    world_file = LaunchConfiguration('world', default='turtlebot3_world.world')
     config_file = LaunchConfiguration('config_file', default='my_lidar.yaml')
     rviz_use = LaunchConfiguration('rviz', default='true')
     nav2_use = LaunchConfiguration('nav2', default='true')
@@ -40,10 +41,11 @@ def generate_launch_description():
         robot_desc = f.read()
 
     # ======================== 1. Gazebo 仿真环境 ========================
-    gazebo_world = PathJoinSubstitution([
+    world_path = os.path.join(
         get_package_share_directory('turtlebot3_gazebo'),
-        'worlds', world_name
-    ])
+        'worlds',
+    )
+    gazebo_world = PathJoinSubstitution([world_path, world_file])
 
     gzserver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -139,7 +141,7 @@ def generate_launch_description():
     return LaunchDescription([
         # 参数声明
         DeclareLaunchArgument('use_sim_time', default_value='true'),
-        DeclareLaunchArgument('world', default_value='turtlebot3_world'),
+        DeclareLaunchArgument('world', default_value='turtlebot3_world.world'),
         DeclareLaunchArgument('config_file', default_value='my_lidar.yaml'),
         DeclareLaunchArgument('rviz', default_value='true'),
         DeclareLaunchArgument('nav2', default_value='true'),

@@ -56,6 +56,14 @@ def generate_launch_description():
         condition=IfCondition(rviz_use)
     )
 
+    # ======================== Odom 桥接 (供 Nav2 和 RViz 统一 TF) ========================
+    odom_bridge = Node(
+        package='fast_lio',
+        executable='odom_bridge.py',
+        name='odom_bridge',
+        output='screen',
+    )
+
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_config_path_cmd)
@@ -64,6 +72,7 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_path_cmd)
 
     ld.add_action(fast_lio_node)
+    ld.add_action(odom_bridge)
     ld.add_action(rviz_node)
 
     return ld
