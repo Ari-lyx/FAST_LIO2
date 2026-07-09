@@ -6,7 +6,7 @@
         filter_size_surf: 0.5         # 去畸变后体素降采样(m): 0.5→0.8~1.0 减少点数
         filter_size_map: 0.5          # 地图体素降采样(m): 0.5→0.8~1.0 减少KD树搜索
         cube_side_length: 1000.0      # 局部地图边长(m): 可考虑减小到500减少地图维护开销
-        runtime_pos_log_enable: false
+        runtime_pos_log_enable: true    # 开启诊断日志，输出到 Log/ 目录
         map_file_path: "/home/lyx/Downloads/FAST_LIO2_ws/pcd/test.pcd"
         # === 快速播放防漂移参数 ===
         adaptive_downsample_en: true  # 启用自适应降采样: 处理慢时自动增大filter

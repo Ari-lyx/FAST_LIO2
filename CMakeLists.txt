@@ -120,6 +120,12 @@ install(TARGETS fastlio_mapping
   DESTINATION lib/${PROJECT_NAME}
 )
 
+# ---------------- Install Python scripts ---------------- #
+install(
+  PROGRAMS scripts/odom_bridge.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(
   DIRECTORY config launch rviz rviz_cfg
   DESTINATION share/${PROJECT_NAME}
