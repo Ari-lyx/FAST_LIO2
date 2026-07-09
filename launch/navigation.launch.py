@@ -12,10 +12,8 @@ def generate_launch_description():
 
     # ---- 参数 ----
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
-    params_file = LaunchConfiguration(
-        'params_file',
-        default=os.path.join(package_dir, 'config', 'nav2_params.yaml')
-    )
+    params_file = LaunchConfiguration('params_file')
+    default_params_file = os.path.join(package_dir, 'config', 'nav2_params.yaml')
 
     # Nav2 navigation_launch.py（仅启动导航栈，不含 AMCL/slam_toolbox）
     # 定位由 FAST-LIO2 + odom_bridge 提供
@@ -32,7 +30,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'params_file',
-            default_value=params_file,
+            default_value=default_params_file,
             description='Nav2 params file path'
         ),
 

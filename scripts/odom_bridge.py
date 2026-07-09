@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
-FAST-LIO → Nav2 Odometry Bridge (v2 - Robust)
+FAST-LIO -> Nav2 Odometry Bridge
 
 功能：
-  1. 启动时立即发布静态 TF: map→odom, map→camera_init (identity)
-  2. 启动时立即发布初始 identity TF: odom→base_link (防止 Nav2 等待)
-  3. 订阅 FAST-LIO 的 /Odometry (camera_init→body)
-     → 更新动态 TF: odom→base_link
-     → 重发布为 /odom (odom→base_link)
+  1. 发布静态 TF: map->odom, map->camera_init (identity)
+  2. 在 FAST-LIO 首帧到来前持续发布初始 identity TF: odom->base_footprint
+  3. 订阅 FAST-LIO 的 /Odometry (camera_init->body)
+     -> 投影为 2D base_footprint 位姿
+     -> 更新动态 TF: odom->base_footprint
+     -> 重发布为 /odom
 
 TF 树:
-  map ──(static identity)──→ odom ──(dynamic, FAST-LIO pose)──→ base_link
-  map ──(static identity)──→ camera_init ──(FAST-LIO TF)──→ body
-
-注意：body→base_link 的连接通过 robot_state_publisher 的 URDF 自动完成
-      (body 与 imu_link 对齐, imu_link→base_link 由 URDF 定义)
+  map --(static identity)--> odom --(dynamic 2D FAST-LIO pose)--> base_footprint
+  base_footprint --(URDF fixed)--> base_link
+  map --(static identity)--> camera_init --(FAST-LIO TF)--> body
 """
+
+import math
+from copy import deepcopy
 
 import rclpy
 from rclpy.node import Node
@@ -24,99 +26,170 @@ from geometry_msgs.msg import TransformStamped
 import tf2_ros
 
 
+def yaw_from_quaternion(q):
+    """Return yaw from a geometry_msgs Quaternion."""
+    siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+    cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+def quaternion_from_yaw(yaw):
+    """Return a geometry_msgs-style z/w tuple for a yaw-only quaternion."""
+    half_yaw = yaw * 0.5
+    return math.sin(half_yaw), math.cos(half_yaw)
+
+
 class OdomBridge(Node):
     def __init__(self):
         super().__init__('odom_bridge')
 
+        self.declare_parameter('input_odom_topic', '/Odometry')
+        self.declare_parameter('output_odom_topic', '/odom')
+        self.declare_parameter('map_frame', 'map')
+        self.declare_parameter('odom_frame', 'odom')
+        self.declare_parameter('base_frame', 'base_footprint')
+        self.declare_parameter('source_frame', 'camera_init')
+        self.declare_parameter('project_to_2d', True)
+        self.declare_parameter('publish_map_to_odom', True)
+        self.declare_parameter('publish_map_to_source', True)
+        self.declare_parameter('initial_tf_rate', 10.0)
+
+        self.input_odom_topic = self.get_parameter(
+            'input_odom_topic').get_parameter_value().string_value
+        self.output_odom_topic = self.get_parameter(
+            'output_odom_topic').get_parameter_value().string_value
+        self.map_frame = self.get_parameter(
+            'map_frame').get_parameter_value().string_value
+        self.odom_frame = self.get_parameter(
+            'odom_frame').get_parameter_value().string_value
+        self.base_frame = self.get_parameter(
+            'base_frame').get_parameter_value().string_value
+        self.source_frame = self.get_parameter(
+            'source_frame').get_parameter_value().string_value
+        self.project_to_2d = self.get_parameter(
+            'project_to_2d').get_parameter_value().bool_value
+        self.publish_map_to_odom = self.get_parameter(
+            'publish_map_to_odom').get_parameter_value().bool_value
+        self.publish_map_to_source = self.get_parameter(
+            'publish_map_to_source').get_parameter_value().bool_value
+        initial_tf_rate = self.get_parameter(
+            'initial_tf_rate').get_parameter_value().double_value
+
         # 订阅 FAST-LIO 的 /Odometry
         self.sub = self.create_subscription(
-            Odometry, '/Odometry', self.odom_callback, 10)
+            Odometry, self.input_odom_topic, self.odom_callback, 10)
 
         # 发布 /odom 话题供 Nav2
-        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.odom_pub = self.create_publisher(Odometry, self.output_odom_topic, 10)
 
         # TF 广播器
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         self.static_broadcaster = tf2_ros.StaticTransformBroadcaster(self)
 
-        # 先发布初始 identity TF，再发布静态 TF
-        now = self.get_clock().now().to_msg()
-        self._publish_initial_odom_tf(now)
-        self._publish_static_transforms(now)
-
-        self.get_logger().info('OdomBridge v2 started')
-        self.get_logger().info('  Static TFs: map->odom, map->camera_init')
-        self.get_logger().info('  Dynamic: odom->base_footprint from /Odometry')
-
-        # 用于第一次接收 /Odometry 后的日志
         self._first_odom = True
 
-    def _publish_initial_odom_tf(self, stamp):
-        """发布初始 identity TF odom→base_footprint，让 Nav2 启动时不等待"""
+        # 先发布静态 TF，再持续发布初始 identity TF，直到 FAST-LIO 首帧到来。
+        now = self.get_clock().now().to_msg()
+        self._publish_static_transforms(now)
+        self._publish_initial_odom_tf()
+        timer_period = 1.0 / max(initial_tf_rate, 1.0)
+        self.initial_tf_timer = self.create_timer(
+            timer_period, self._publish_initial_odom_tf)
+
+        self.get_logger().info('OdomBridge started')
+        self.get_logger().info(
+            f'  {self.input_odom_topic} -> {self.output_odom_topic}')
+        self.get_logger().info(
+            f'  Dynamic TF: {self.odom_frame}->{self.base_frame}')
+        self.get_logger().info(f'  Project to 2D: {self.project_to_2d}')
+
+    def _publish_initial_odom_tf(self):
+        """发布初始 identity TF odom->base_frame，让 Nav2 启动时不等待。"""
+        if not self._first_odom:
+            return
         t = TransformStamped()
-        t.header.stamp = stamp
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_footprint'
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = self.odom_frame
+        t.child_frame_id = self.base_frame
         t.transform.translation.x = 0.0
         t.transform.translation.y = 0.0
         t.transform.translation.z = 0.0
         t.transform.rotation.w = 1.0
         self.tf_broadcaster.sendTransform(t)
-        self.get_logger().info('  Initial identity TF: odom->base_footprint')
 
     def _publish_static_transforms(self, stamp):
         """发布静态 TF (只在启动时发布一次)"""
-        # 1. map → odom (identity)
-        t1 = TransformStamped()
-        t1.header.stamp = stamp
-        t1.header.frame_id = 'map'
-        t1.child_frame_id = 'odom'
-        t1.transform.translation.x = 0.0
-        t1.transform.translation.y = 0.0
-        t1.transform.translation.z = 0.0
-        t1.transform.rotation.w = 1.0
+        transforms = []
+        if self.publish_map_to_odom:
+            transforms.append(self._make_identity_static(
+                stamp, self.map_frame, self.odom_frame))
+        if self.publish_map_to_source:
+            transforms.append(self._make_identity_static(
+                stamp, self.map_frame, self.source_frame))
 
-        # 2. map → camera_init (identity)
-        t2 = TransformStamped()
-        t2.header.stamp = stamp
-        t2.header.frame_id = 'map'
-        t2.child_frame_id = 'camera_init'
-        t2.transform.translation.x = 0.0
-        t2.transform.translation.y = 0.0
-        t2.transform.translation.z = 0.0
-        t2.transform.rotation.w = 1.0
+        if transforms:
+            self.static_broadcaster.sendTransform(transforms)
 
-        self.static_broadcaster.sendTransform([t1, t2])
+    @staticmethod
+    def _make_identity_static(stamp, parent_frame, child_frame):
+        t = TransformStamped()
+        t.header.stamp = stamp
+        t.header.frame_id = parent_frame
+        t.child_frame_id = child_frame
+        t.transform.translation.x = 0.0
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 0.0
+        t.transform.rotation.w = 1.0
+        return t
 
     def odom_callback(self, msg):
         """收到 FAST-LIO 的 /Odometry → 更新 TF 和 /odom"""
+        position = msg.pose.pose.position
+        orientation = msg.pose.pose.orientation
+        yaw = yaw_from_quaternion(orientation)
+        yaw_z, yaw_w = quaternion_from_yaw(yaw)
+
         # --- 日志: 第一次收到 ---
         if self._first_odom:
+            nav_z = 0.0 if self.project_to_2d else position.z
             self.get_logger().info(
-                f'First /Odometry received: '
-                f'pos({msg.pose.pose.position.x:.2f}, '
-                f'{msg.pose.pose.position.y:.2f}, '
-                f'{msg.pose.pose.position.z:.2f})')
+                f'First {self.input_odom_topic} received: '
+                f'fast_lio_pos=({position.x:.2f}, {position.y:.2f}, {position.z:.2f}), '
+                f'nav2_pos=({position.x:.2f}, {position.y:.2f}, {nav_z:.2f}), '
+                f'yaw={yaw:.3f}')
             self._first_odom = False
+            self.initial_tf_timer.cancel()
 
-        # --- 发布 TF: odom → base_footprint ---
+        # --- 发布 TF: odom -> base_frame ---
         t = TransformStamped()
         t.header.stamp = msg.header.stamp
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_footprint'
-        t.transform.translation.x = msg.pose.pose.position.x
-        t.transform.translation.y = msg.pose.pose.position.y
-        t.transform.translation.z = msg.pose.pose.position.z
-        t.transform.rotation = msg.pose.pose.orientation
+        t.header.frame_id = self.odom_frame
+        t.child_frame_id = self.base_frame
+        t.transform.translation.x = position.x
+        t.transform.translation.y = position.y
+        t.transform.translation.z = 0.0 if self.project_to_2d else position.z
+        if self.project_to_2d:
+            t.transform.rotation.x = 0.0
+            t.transform.rotation.y = 0.0
+            t.transform.rotation.z = yaw_z
+            t.transform.rotation.w = yaw_w
+        else:
+            t.transform.rotation = orientation
         self.tf_broadcaster.sendTransform(t)
 
         # --- 发布 /odom 话题 ---
         odom = Odometry()
         odom.header.stamp = msg.header.stamp
-        odom.header.frame_id = 'odom'
-        odom.child_frame_id = 'base_footprint'
-        odom.pose = msg.pose
-        odom.twist = msg.twist
+        odom.header.frame_id = self.odom_frame
+        odom.child_frame_id = self.base_frame
+        odom.pose = deepcopy(msg.pose)
+        if self.project_to_2d:
+            odom.pose.pose.position.z = 0.0
+            odom.pose.pose.orientation.x = 0.0
+            odom.pose.pose.orientation.y = 0.0
+            odom.pose.pose.orientation.z = yaw_z
+            odom.pose.pose.orientation.w = yaw_w
+        odom.twist = deepcopy(msg.twist)
         self.odom_pub.publish(odom)
 
 

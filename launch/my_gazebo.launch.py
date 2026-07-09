@@ -61,6 +61,12 @@ def generate_launch_description():
         package='fast_lio',
         executable='odom_bridge.py',
         name='odom_bridge',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'base_frame': 'base_footprint',
+            'project_to_2d': True,
+            'publish_map_to_source': True,
+        }],
         output='screen',
     )
 
