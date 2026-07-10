@@ -112,6 +112,9 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': use_sim_time,
             'base_frame': 'base_footprint',
+            'source_frame': 'camera_init',
+            'source_child_frame': 'body',
+            'output_odom_topic': '/odom',
             'project_to_2d': True,
             'publish_map_to_source': True,
         }],
