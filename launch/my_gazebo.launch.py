@@ -14,12 +14,18 @@ def generate_launch_description():
     package_path = get_package_share_directory('fast_lio')
     default_config_path = os.path.join(package_path, 'config')
     default_rviz_config_path = os.path.join(package_path, 'rviz_cfg', 'my.rviz')
+    # TurtleBot3 URDF — 需 source turtlebot3_ws
+    default_urdf_path = '/home/lyx/turtlebot3_ws/turtlebot3_waffle_pi.urdf'
 
     use_sim_time = LaunchConfiguration('use_sim_time')
     config_path = LaunchConfiguration('config_path')
     config_file = LaunchConfiguration('config_file')
     rviz_use = LaunchConfiguration('rviz')
     rviz_cfg = LaunchConfiguration('rviz_cfg')
+
+    # 读取 URDF 文本
+    with open(default_urdf_path, 'r') as f:
+        robot_desc = f.read()
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         'use_sim_time', default_value='true',
@@ -73,6 +79,37 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ======================== Robot State Publisher (URDF → TF + RViz 模型) ========================
+    robot_state_publisher = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        name='robot_state_publisher',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'robot_description': robot_desc,
+        }],
+        output='screen',
+    )
+
+    # ======================== 点云滤波 (去地面, 降采样, 供代价地图) ========================
+    pointcloud_filter = Node(
+        package='fast_lio',
+        executable='nav2_pointcloud_filter.py',
+        name='nav2_pointcloud_filter',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'input_topic': '/cloud_registered_body',
+            'output_topic': '/costmap/points',
+            'min_range': 0.15,
+            'max_range': 8.0,
+            'voxel_size': 0.05,
+            'ground_distance': 0.08,
+            'min_obstacle_height': 0.18,
+            'max_obstacle_height': 1.8,
+        }],
+        output='screen',
+    )
+
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_config_path_cmd)
@@ -82,6 +119,8 @@ def generate_launch_description():
 
     ld.add_action(fast_lio_node)
     ld.add_action(odom_bridge)
+    ld.add_action(robot_state_publisher)
+    ld.add_action(pointcloud_filter)
     ld.add_action(rviz_node)
 
     return ld

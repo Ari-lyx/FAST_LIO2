@@ -122,7 +122,9 @@ install(TARGETS fastlio_mapping
 
 # ---------------- Install Python scripts ---------------- #
 install(
-  PROGRAMS scripts/odom_bridge.py
+  PROGRAMS
+    scripts/odom_bridge.py
+    scripts/nav2_pointcloud_filter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

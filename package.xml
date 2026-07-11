@@ -31,8 +31,8 @@
   <depend>livox_ros_driver2</depend>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <exec_depend>rosidl_default_runtime</exec_depend>
-  <exec_depend>spatio_temporal_voxel_layer</exec_depend>
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>

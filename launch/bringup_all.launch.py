@@ -121,6 +121,29 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ======================== 5.5. Nav2 代价地图点云预过滤 ========================
+    nav2_pointcloud_filter = Node(
+        package='fast_lio',
+        executable='nav2_pointcloud_filter.py',
+        name='nav2_pointcloud_filter',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'input_topic': '/cloud_registered_body',
+            'output_topic': '/costmap/points',
+            'min_range': 0.15,
+            'max_range': 8.0,
+            'voxel_size': 0.05,
+            'ground_distance': 0.08,
+            'min_obstacle_height': 0.18,
+            'max_obstacle_height': 1.8,
+            'ransac_iterations': 60,
+            'ransac_sample_size': 6000,
+            'ground_candidate_percentile': 45.0,
+            'max_ground_tilt_deg': 30.0,
+        }],
+        output='screen',
+    )
+
     # ======================== 6. Nav2 导航栈 ========================
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -162,6 +185,7 @@ def generate_launch_description():
         spawn_robot,
         fast_lio,
         odom_bridge,
+        nav2_pointcloud_filter,
         nav2_launch,
         rviz2,
     ])
