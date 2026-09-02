@@ -123,8 +123,12 @@ class OdomBridge(Node):
         """发布初始 identity TF odom->base_frame，让 Nav2 启动时不等待。"""
         if self._have_pose:
             return
+        if not self._last_odom:
+            stamp = self.get_clock().now().to_msg()
+        else:
+            stamp = self._last_odom.header.stamp
         t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.stamp = stamp
         t.header.frame_id = self.odom_frame
         t.child_frame_id = self.base_frame
         t.transform.translation.x = 0.0

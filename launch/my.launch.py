@@ -49,6 +49,37 @@ def generate_launch_description():
                     {'use_sim_time': use_sim_time}],
         output='screen'
     )
+
+    # ======================== Odom 桥接 (FAST-LIO → Nav2 TF) ========================
+    odom_bridge = Node(
+        package='fast_lio',
+        executable='odom_bridge.py',
+        name='odom_bridge',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+        }],
+        output='screen',
+    )
+
+    # ======================== 点云滤波 (去地面, 降采样, → /costmap/points) ========================
+    pointcloud_filter = Node(
+        package='fast_lio',
+        executable='nav2_pointcloud_filter.py',
+        name='nav2_pointcloud_filter',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'input_topic': '/cloud_registered_body',
+            'output_topic': '/costmap/points',
+            'min_range': 0.15,
+            'max_range': 15.0,
+            'voxel_size': 0.05,
+            'ground_distance': 0.08,
+            'min_obstacle_height': 0.18,
+            'max_obstacle_height': 1.8,
+        }],
+        output='screen',
+    )
+
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -64,6 +95,8 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_path_cmd)
 
     ld.add_action(fast_lio_node)
+    ld.add_action(odom_bridge)
+    ld.add_action(pointcloud_filter)
     ld.add_action(rviz_node)
 
     return ld
